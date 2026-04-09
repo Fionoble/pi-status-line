@@ -12,6 +12,10 @@
  * Powerline separators (chevrons) divide each segment with smooth transitions.
  */
 
+import { execSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { platform } from "node:os";
+import { join } from "node:path";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
@@ -19,6 +23,7 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 // ── Powerline glyphs ─────────────────────────────────────────────
 const SEP_RIGHT = "\ue0b0"; // 
 const SEP_RIGHT_THIN = "\ue0b1"; // 
+const SEP_LEFT = "\ue0b2"; // 
 
 // ── ANSI helpers ─────────────────────────────────────────────────
 function rgb(r: number, g: number, b: number, text: string): string {
@@ -55,6 +60,7 @@ const PALETTE = {
   cost: { fg: [220, 200, 170] as [number, number, number], bg: [90, 75, 40] as [number, number, number] },
 
   // Right side segments
+  cwd: { fg: [180, 190, 200] as [number, number, number], bg: [55, 60, 70] as [number, number, number] },
   git: { fg: [220, 180, 140] as [number, number, number], bg: [80, 55, 35] as [number, number, number] },
   turns: { fg: [180, 200, 220] as [number, number, number], bg: [40, 65, 90] as [number, number, number] },
   state: { fg: [235, 235, 235] as [number, number, number], bg: [62, 68, 114] as [number, number, number] },
@@ -160,23 +166,21 @@ function renderRightSegments(segments: Segment[]): string {
     const [fr, fg, fb] = seg.colors.fg;
     const [br, bg, bb] = seg.colors.bg;
 
-    // Reverse separator (arrow pointing left)
+    // Left-pointing separator before each segment
     if (i === 0) {
-      result += reset() + fgRgb(br, bg, bb) + SEP_RIGHT + reset();
+      // First right segment: arrow from empty bg into segment bg
+      result += reset() + fgRgb(br, bg, bb) + SEP_LEFT;
+    } else {
+      // Between right segments: arrow from previous bg into this bg
+      const prev = segments[i - 1];
+      const [pbr, pbg, pbb] = prev.colors.bg;
+      result += bgRgbCode(pbr, pbg, pbb) + fgRgb(br, bg, bb) + SEP_LEFT;
     }
 
     // Segment content
     result += bgRgbCode(br, bg, bb) + fgRgb(fr, fg, fb) + ` ${seg.text} `;
-
-    // Inter-segment thin separator
-    if (i < segments.length - 1) {
-      const next = segments[i + 1];
-      const [nbr, nbg, nbb] = next.colors.bg;
-      result += bgRgbCode(nbr, nbg, nbb) + fgRgb(br, bg, bb) + SEP_RIGHT;
-    } else {
-      result += reset();
-    }
   }
+  result += reset();
   return result;
 }
 
@@ -186,10 +190,112 @@ function totalVisibleWidth(segments: Segment[]): number {
   return segments.reduce((sum, seg) => sum + seg.visWidth + 3, 0);
 }
 
+// ── Font detection ───────────────────────────────────────────────
+
+/** Known Nerd Font / Powerline font name fragments (case-insensitive). */
+const NERD_FONT_MARKERS = [
+  "nerd font",
+  "powerline",
+  "nf-",
+  "nerdfont",
+];
+
+/**
+ * Check whether the system has at least one Nerd Font / Powerline font
+ * installed. Returns true if found (or if detection is unsupported on
+ * this platform), false if definitely missing.
+ */
+function hasNerdFont(): boolean {
+  try {
+    const os = platform();
+
+    if (os === "darwin") {
+      // Check user and system font directories for Nerd Font files
+      const fontDirs = [
+        join(process.env.HOME || "~", "Library/Fonts"),
+        "/Library/Fonts",
+        "/System/Library/Fonts",
+      ];
+
+      for (const dir of fontDirs) {
+        try {
+          const files = readdirSync(dir);
+          const hasNF = files.some((f) => {
+            const lower = f.toLowerCase();
+            return NERD_FONT_MARKERS.some((m) => lower.includes(m.replace(/ /g, "")));
+          });
+          if (hasNF) return true;
+        } catch {
+          // Directory doesn't exist or isn't readable
+        }
+      }
+
+      // Fallback: ask the system font registry
+      try {
+        const out = execSync(
+          "system_profiler SPFontsDataType 2>/dev/null | grep -i 'nerd\\|powerline' | head -1",
+          { timeout: 3000, encoding: "utf8" },
+        );
+        if (out.trim().length > 0) return true;
+      } catch {
+        // system_profiler failed or timed out
+      }
+
+      return false;
+    }
+
+    if (os === "linux") {
+      try {
+        const out = execSync("fc-list : family 2>/dev/null", {
+          timeout: 3000,
+          encoding: "utf8",
+        });
+        const lower = out.toLowerCase();
+        return NERD_FONT_MARKERS.some((m) => lower.includes(m));
+      } catch {
+        // fc-list not available
+      }
+      return true; // Can't detect — assume OK
+    }
+
+    // Windows or unknown: skip detection
+    return true;
+  } catch {
+    return true; // On any error, don't annoy the user
+  }
+}
+
+function fontInstallHint(): string {
+  const os = platform();
+  if (os === "darwin") {
+    return [
+      "Install a Nerd Font for powerline glyphs:",
+      "  brew install --cask font-fira-code-nerd-font",
+      "",
+      "Then set it in your terminal (e.g. for Ghostty):",
+      '  echo \'font-family = FiraCode Nerd Font\' >> ~/Library/Application\\ Support/com.mitchellh.ghostty/config.ghostty',
+      "",
+      "Other popular choices: font-jetbrains-mono-nerd-font, font-hack-nerd-font, font-meslo-lg-nerd-font",
+    ].join("\n");
+  }
+  if (os === "linux") {
+    return [
+      "Install a Nerd Font for powerline glyphs:",
+      "  # Ubuntu/Debian:",
+      "  sudo apt install fonts-firacode",
+      "  # Or download from https://www.nerdfonts.com/font-downloads",
+      "",
+      "Then configure your terminal emulator to use it.",
+    ].join("\n");
+  }
+  return "Install a Nerd Font from https://www.nerdfonts.com/ for powerline glyphs.";
+}
+
 // ── Extension ────────────────────────────────────────────────────
 export default function (pi: ExtensionAPI) {
   let turnCount = 0;
   let agentState: "idle" | "thinking" | "tool" = "idle";
+  let fontWarningShown = false;
 
   pi.on("session_start", async (_event, ctx) => {
     turnCount = 0;
@@ -200,6 +306,16 @@ export default function (pi: ExtensionAPI) {
       }
     }
     agentState = "idle";
+
+    // One-time font check
+    if (!fontWarningShown && ctx.hasUI && !hasNerdFont()) {
+      fontWarningShown = true;
+      ctx.ui.notify(
+        "pi-status-line: No Nerd Font detected. Powerline glyphs may render as boxes.\n\n" + fontInstallHint(),
+        "warning",
+      );
+    }
+
     updateFooter(ctx);
   });
 
@@ -288,6 +404,24 @@ export default function (pi: ExtensionAPI) {
 
           // ── Build right segments ───────────────────────────
           const rightSegs: Segment[] = [];
+
+          // Current directory (show basename, or ~ for home)
+          const home = process.env.HOME || "";
+          let cwdLabel = ctx.cwd || process.cwd();
+          if (home && cwdLabel === home) {
+            cwdLabel = "~";
+          } else if (home && cwdLabel.startsWith(home + "/")) {
+            cwdLabel = "~/" + cwdLabel.slice(home.length + 1);
+          }
+          // Show last two path components to keep it compact
+          const parts = cwdLabel.split("/");
+          if (parts.length > 3 && cwdLabel !== "~") {
+            cwdLabel = "…/" + parts.slice(-2).join("/");
+          }
+          rightSegs.push(buildSegment(
+            `📂 ${cwdLabel}`,
+            PALETTE.cwd
+          ));
 
           // Git branch
           if (branch) {

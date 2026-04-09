@@ -1,0 +1,14 @@
+{
+  "name": "pi-status-line",
+  "version": "1.0.0",
+  "description": "A powerline-style status line for pi coding agent",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*"
+  }
+}

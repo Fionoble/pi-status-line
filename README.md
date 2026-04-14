@@ -1,9 +1,9 @@
 # ⚡ pi-status-line
 
-A **powerline-style status line** for the [pi coding agent](https://github.com/badlogic/pi-mono) — replacing the default footer with a rich, information-dense bar inspired by vim-airline and Claude Powerline.
+A **powerline-style status line** and **interactive todo list** for the [pi coding agent](https://github.com/badlogic/pi-mono) — replacing the default footer with a rich, information-dense bar and adding persistent task tracking across sessions.
 
 ```
- ⬡ claude-sonnet-4-20250514  ◕ high  ↑12.3k ↓2.1k  $0.042     📂 …/my/project   main  ⟳ 5  ✓ ready 
+ ⬡ claude-sonnet-4-20250514  ◕ high  ↑12.3k ↓2.1k  $0.042  📋 8 todo     📂 …/my/project   main  ⟳ 5  ✓ ready 
 ```
 
 > Works with any terminal that supports true color (24-bit RGB) and powerline fonts.
@@ -12,7 +12,9 @@ A **powerline-style status line** for the [pi coding agent](https://github.com/b
 
 ## ✨ Features
 
-### Left Side — Model & Usage
+### Powerline Status Bar
+
+#### Left Side — Model, Usage & Todo
 
 | Segment | Icon | Description |
 |---------|------|-------------|
@@ -20,8 +22,9 @@ A **powerline-style status line** for the [pi coding agent](https://github.com/b
 | **Thinking** | `○` `◔` `◑` `◕` `●` `⬤` | Current thinking/reasoning level — hidden when `off`, progressively filled circle for minimal → xhigh |
 | **Tokens** | `↑` `↓` | Cumulative input/output token counts for the session, auto-formatted (`1234` → `1.2k` → `1.23M`) |
 | **Cost** | `$` | Running session cost — hidden when zero, precision adjusts to magnitude |
+| **Todo** | `📋` `⚠` `🔴` | Open todo count — changes color based on urgency. Hidden when list is empty. |
 
-### Right Side — Context & State
+#### Right Side — Context & State
 
 | Segment | Icon | Description |
 |---------|------|-------------|
@@ -30,13 +33,57 @@ A **powerline-style status line** for the [pi coding agent](https://github.com/b
 | **Turns** | `⟳` | Total turn count for the session, restored from history on resume |
 | **Agent state** | `✓` `◉` `⚙` | Real-time indicator: `ready` (idle), `thinking` (LLM streaming), `tools` (tool execution) |
 
-### Design
+#### Todo Segment States
 
-- **Powerline separators** — Left side uses right-pointing chevrons (``) and right side uses left-pointing chevrons (``) for proper directional flow
-- **Smart visibility** — Segments hide themselves when irrelevant (no cost yet, thinking off, no git repo)
-- **Live updates** — Footer re-renders on every turn start/end, tool execution, model change, and git branch switch
-- **Session-aware** — Reconstructs turn count from session history when resuming a session
-- **Font detection** — Checks for Nerd Font / Powerline font on startup and shows install instructions if missing
+| State | Color | Example |
+|-------|-------|---------|
+| Normal | Green | `📋 12 todo` |
+| Has stale items (7+ days) | Amber | `⚠ 3 stale · 12 todo` |
+| Has overdue items (14+ days) | Red | `🔴 2 overdue · 12 todo` |
+| Empty | Hidden | *(segment not shown)* |
+
+### Interactive Todo List
+
+A persistent, categorized task list at `~/.pi/agent/todo.md` that you can manage from any pi session.
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/todo` | Open the interactive todo list — navigate with ↑↓/jk, toggle items with space/x, switch sections with tab |
+| `/todo add <text>` | Quick-add an item. Auto-categorizes based on keywords (review → Reviews, reply → Slack, 1:1 → Management, etc.) |
+| `/briefing` | Run the morning briefing prompt (requires a `plan-my-day` prompt template) |
+| **Ctrl+T** | Keyboard shortcut to open the todo list from anywhere |
+
+#### Categories
+
+Items are automatically organized under these headings:
+
+| Category | What goes here |
+|----------|---------------|
+| **Projects** | Active project work — features, experiments, technical initiatives |
+| **Management** | People tasks — check-ins, feedback, 1:1 prep, team health |
+| **Reviews & Delegation** | PR reviews, RFC decisions, things to hand off |
+| **Slack Replies Owed** | Messages you committed to responding to |
+| **Maintenance** | Infrastructure, cleanup, tooling, process fixes |
+| **Done** | Completed items with dates |
+
+#### Staleness Markers
+
+The todo list supports urgency prefixes that the status bar reads:
+
+- `⚠️ STALE` — Items older than 7 days without progress
+- `🔴 OVERDUE` — Items older than 14 days
+
+Add these prefixes to item text and they'll be reflected in the powerline segment color.
+
+#### Any Session Can Manage the List
+
+The todo file lives at `~/.pi/agent/todo.md` — accessible from any pi session regardless of working directory. The extension registers a `todo` tool and injects system prompt instructions automatically, so the LLM knows about the list on every turn. Just say:
+
+> "Add 'follow up with Alice on the API design' to my todo list"
+
+The LLM will use the `todo` tool to add it to the right category. It also proactively adds items when it notices you making commitments ("I'll do X", "remind me to Y").
 
 ---
 
@@ -48,6 +95,8 @@ A **powerline-style status line** for the [pi coding agent](https://github.com/b
 pi install git:github.com/Fionoble/pi-status-line
 ```
 
+This installs both the powerline status bar and the interactive todo list.
+
 ### From a local clone
 
 ```bash
@@ -57,7 +106,7 @@ pi install /path/to/pi-status-line
 
 ### Project-local install
 
-To use the status line only in a specific project (instead of globally):
+To use only in a specific project (instead of globally):
 
 ```bash
 pi install -l git:github.com/Fionoble/pi-status-line
@@ -66,7 +115,11 @@ pi install -l git:github.com/Fionoble/pi-status-line
 ### Quick test (no install)
 
 ```bash
+# Status line only
 pi -e /path/to/pi-status-line/src/index.ts
+
+# Both status line and todo
+pi -e /path/to/pi-status-line/src/index.ts -e /path/to/pi-status-line/src/briefing.ts
 ```
 
 ### Uninstall
@@ -127,6 +180,9 @@ Each segment has a distinct background color for quick visual scanning:
 | Thinking | Deep purple | `rgb(80, 60, 120)` |
 | Tokens | Forest green | `rgb(50, 80, 60)` |
 | Cost | Amber | `rgb(90, 75, 40)` |
+| Todo (normal) | Soft green | `rgb(40, 65, 45)` |
+| Todo (stale) | Warm amber | `rgb(90, 75, 35)` |
+| Todo (overdue) | Alert red | `rgb(100, 40, 40)` |
 | Working dir | Slate gray | `rgb(55, 60, 70)` |
 | Git | Warm brown | `rgb(80, 55, 35)` |
 | Turns | Steel blue | `rgb(40, 65, 90)` |
@@ -138,7 +194,9 @@ Colors are rendered using 24-bit true color ANSI escapes, so they work consisten
 
 ## 🔧 How It Works
 
-The extension is a single TypeScript file that hooks into pi's extension API:
+The package includes two extensions:
+
+### `src/index.ts` — Powerline Status Bar
 
 1. **Replaces the footer** via `ctx.ui.setFooter()` with a custom powerline renderer
 2. **Subscribes to events** to track agent state in real-time:
@@ -147,21 +205,26 @@ The extension is a single TypeScript file that hooks into pi's extension API:
    - `tool_execution_start` — Show tool execution state
    - `agent_end` — Reset to idle
    - `model_select` — Update model display on switch
-3. **Reads session data** from `ctx.sessionManager.getBranch()` to compute cumulative token usage and cost
-4. **Reacts to git changes** via `footerData.onBranchChange()` for live branch updates
-5. **Detects fonts** on startup — checks macOS font directories and `system_profiler`, or `fc-list` on Linux
+3. **Reads todo list** from `~/.pi/agent/todo.md` on each render to show todo counts
+4. **Reads session data** from `ctx.sessionManager.getBranch()` to compute cumulative token usage and cost
+5. **Reacts to git changes** via `footerData.onBranchChange()` for live branch updates
+6. **Detects fonts** on startup — checks macOS font directories and `system_profiler`, or `fc-list` on Linux
+
+### `src/briefing.ts` — Interactive Todo List
+
+1. **Parses `~/.pi/agent/todo.md`** — a standard markdown file with `## Section` headers and `- [ ]` / `- [x]` checkboxes
+2. **Registers `/todo` command** — full-screen interactive UI with keyboard navigation, section switching, and toggle-to-complete
+3. **Registers `/todo add` command** — quick-add with auto-categorization based on keywords
+4. **Registers `/briefing` command** — triggers a morning briefing prompt template
+5. **Registers Ctrl+T shortcut** — quick access to the todo list from anywhere
+6. **Auto-saves** — changes are written back to the file when you close the UI
 
 ### Architecture
 
 ```
 src/
-└── index.ts          # Single-file extension — all logic in one place
-    ├── ANSI helpers   # True-color RGB foreground/background utilities
-    ├── Color palette  # Segment color definitions
-    ├── Formatters     # Token count, cost, provider icon, thinking icon
-    ├── Font detection # Nerd Font / Powerline font detection (macOS + Linux)
-    ├── Renderer       # Powerline segment builder (left + right aligned)
-    └── Extension      # Event subscriptions + footer registration
+├── index.ts      # Powerline footer — segments, colors, font detection, todo counts
+└── briefing.ts   # Interactive todo list — parser, TUI component, commands, shortcuts
 ```
 
 ---
@@ -185,6 +248,7 @@ Contributions are welcome! Some ideas:
 - **Additional segments** — Context window usage %, cache hit rate, session duration, file count
 - **Narrow terminal support** — Collapse segments progressively on small screens
 - **Animation** — Spinner animation during thinking/tool states
+- **Todo improvements** — Due dates, priorities, drag-to-reorder, search/filter
 - **Windows font detection** — Currently assumes fonts are present on Windows
 
 ### Development
@@ -194,10 +258,10 @@ git clone https://github.com/Fionoble/pi-status-line.git
 cd pi-status-line
 
 # Test your changes
-pi -e ./src/index.ts
+pi -e ./src/index.ts -e ./src/briefing.ts
 ```
 
-The extension uses [jiti](https://github.com/unjs/jiti) under the hood, so TypeScript runs directly — no build step needed.
+The extensions use [jiti](https://github.com/unjs/jiti) under the hood, so TypeScript runs directly — no build step needed.
 
 ---
 

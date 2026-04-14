@@ -13,9 +13,10 @@
  */
 
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { readdirSync } from "node:fs";
 import { platform } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
@@ -58,6 +59,11 @@ const PALETTE = {
   thinking: { fg: [200, 200, 220] as [number, number, number], bg: [80, 60, 120] as [number, number, number] },
   tokens: { fg: [200, 210, 200] as [number, number, number], bg: [50, 80, 60] as [number, number, number] },
   cost: { fg: [220, 200, 170] as [number, number, number], bg: [90, 75, 40] as [number, number, number] },
+
+  // Todo segment
+  todoClean: { fg: [180, 210, 180] as [number, number, number], bg: [40, 65, 45] as [number, number, number] },
+  todoWarn: { fg: [230, 200, 140] as [number, number, number], bg: [90, 75, 35] as [number, number, number] },
+  todoAlert: { fg: [240, 180, 170] as [number, number, number], bg: [100, 40, 40] as [number, number, number] },
 
   // Right side segments
   cwd: { fg: [180, 190, 200] as [number, number, number], bg: [55, 60, 70] as [number, number, number] },
@@ -188,6 +194,38 @@ function totalVisibleWidth(segments: Segment[]): number {
   // Each segment: 1 padding + text + 1 padding + 1 separator = text.length + 3
   // Last segment has no next-separator but has closing chevron = text.length + 3
   return segments.reduce((sum, seg) => sum + seg.visWidth + 3, 0);
+}
+
+// ── Todo list counts ─────────────────────────────────────────────
+
+const TODO_PATH = resolve(process.env.HOME || "~", ".pi", "agent", "todo.md");
+
+interface TodoCounts {
+  total: number;
+  overdue: number;
+  stale: number;
+}
+
+function getTodoCounts(): TodoCounts {
+  try {
+    const content = readFileSync(TODO_PATH, "utf8");
+    let total = 0, overdue = 0, stale = 0;
+    let inDone = false;
+    for (const line of content.split("\n")) {
+      if (line.startsWith("## Done")) { inDone = true; continue; }
+      if (line.startsWith("## ") && inDone) { inDone = false; }
+      if (inDone) continue;
+      const match = line.match(/^- \[ \] (.+)$/);
+      if (match) {
+        total++;
+        if (match[1].includes("🔴 OVERDUE")) overdue++;
+        else if (match[1].includes("⚠️ STALE")) stale++;
+      }
+    }
+    return { total, overdue, stale };
+  } catch {
+    return { total: 0, overdue: 0, stale: 0 };
+  }
 }
 
 // ── Font detection ───────────────────────────────────────────────
@@ -400,6 +438,24 @@ export default function (pi: ExtensionAPI) {
               formatCost(totalCost),
               PALETTE.cost
             ));
+          }
+
+          // Todo segment
+          const todoCounts = getTodoCounts();
+          if (todoCounts.total > 0) {
+            let todoText: string;
+            let todoColor: SegmentColors;
+            if (todoCounts.overdue > 0) {
+              todoText = `🔴 ${todoCounts.overdue} overdue · ${todoCounts.total} todo`;
+              todoColor = PALETTE.todoAlert;
+            } else if (todoCounts.stale > 0) {
+              todoText = `⚠ ${todoCounts.stale} stale · ${todoCounts.total} todo`;
+              todoColor = PALETTE.todoWarn;
+            } else {
+              todoText = `📋 ${todoCounts.total} todo`;
+              todoColor = PALETTE.todoClean;
+            }
+            leftSegs.push(buildSegment(todoText, todoColor));
           }
 
           // ── Build right segments ───────────────────────────

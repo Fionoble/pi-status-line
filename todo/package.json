@@ -1,0 +1,15 @@
+{
+  "name": "pi-todo",
+  "version": "1.0.0",
+  "description": "Interactive todo list with persistent task tracking, LLM tool integration, and completion history for pi coding agent",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  }
+}

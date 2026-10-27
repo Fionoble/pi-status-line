@@ -3,6 +3,9 @@
   "version": "2.0.0",
   "description": "A powerline-style status line for pi coding agent",
   "keywords": ["pi-package"],
+  "scripts": {
+    "test": "node --test tests/*.test.ts"
+  },
   "pi": {
     "extensions": ["./src/index.ts"]
   },

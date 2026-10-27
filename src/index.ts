@@ -13,13 +13,13 @@
  */
 
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { readdirSync } from "node:fs";
 import { platform } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { PrCountPoller, prSegment } from "./pr-count.ts";
 
 // ── Powerline glyphs ─────────────────────────────────────────────
 const SEP_RIGHT = "\ue0b0"; // 
@@ -60,10 +60,9 @@ const PALETTE = {
   tokens: { fg: [200, 210, 200] as [number, number, number], bg: [50, 80, 60] as [number, number, number] },
   cost: { fg: [220, 200, 170] as [number, number, number], bg: [90, 75, 40] as [number, number, number] },
 
-  // Todo segment
-  todoClean: { fg: [180, 210, 180] as [number, number, number], bg: [40, 65, 45] as [number, number, number] },
-  todoWarn: { fg: [230, 200, 140] as [number, number, number], bg: [90, 75, 35] as [number, number, number] },
-  todoAlert: { fg: [240, 180, 170] as [number, number, number], bg: [100, 40, 40] as [number, number, number] },
+  // Shipped PR segment
+  prs: { fg: [180, 210, 180] as [number, number, number], bg: [40, 65, 45] as [number, number, number] },
+  prsWarning: { fg: [230, 200, 140] as [number, number, number], bg: [90, 75, 35] as [number, number, number] },
 
   // Right side segments
   cwd: { fg: [180, 190, 200] as [number, number, number], bg: [55, 60, 70] as [number, number, number] },
@@ -196,38 +195,6 @@ function totalVisibleWidth(segments: Segment[]): number {
   return segments.reduce((sum, seg) => sum + seg.visWidth + 3, 0);
 }
 
-// ── Todo list counts ─────────────────────────────────────────────
-
-const TODO_PATH = resolve(process.env.HOME || "~", ".pi", "agent", "todo.md");
-
-interface TodoCounts {
-  total: number;
-  overdue: number;
-  stale: number;
-}
-
-function getTodoCounts(): TodoCounts {
-  try {
-    const content = readFileSync(TODO_PATH, "utf8");
-    let total = 0, overdue = 0, stale = 0;
-    let inDone = false;
-    for (const line of content.split("\n")) {
-      if (line.startsWith("## Done")) { inDone = true; continue; }
-      if (line.startsWith("## ") && inDone) { inDone = false; }
-      if (inDone) continue;
-      const match = line.match(/^- \[ \] (.+)$/);
-      if (match) {
-        total++;
-        if (match[1].includes("🔴 OVERDUE")) overdue++;
-        else if (match[1].includes("⚠️ STALE")) stale++;
-      }
-    }
-    return { total, overdue, stale };
-  } catch {
-    return { total: 0, overdue: 0, stale: 0 };
-  }
-}
-
 // ── Font detection ───────────────────────────────────────────────
 
 /** Known Nerd Font / Powerline font name fragments (case-insensitive). */
@@ -334,6 +301,11 @@ export default function (pi: ExtensionAPI) {
   let turnCount = 0;
   let agentState: "idle" | "thinking" | "tool" = "idle";
   let fontWarningShown = false;
+  const prCount = new PrCountPoller();
+
+  pi.on("session_shutdown", async () => {
+    prCount.stop();
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     turnCount = 0;
@@ -354,6 +326,7 @@ export default function (pi: ExtensionAPI) {
       );
     }
 
+    if (ctx.mode === "tui") prCount.start();
     updateFooter(ctx);
   });
 
@@ -382,12 +355,14 @@ export default function (pi: ExtensionAPI) {
     updateFooter(ctx);
   });
 
-  function updateFooter(ctx: { ui: any; sessionManager: any; model: any }) {
+  function updateFooter(ctx: ExtensionContext) {
+    if (ctx.mode !== "tui") return;
     ctx.ui.setFooter((tui: any, theme: Theme, footerData: any) => {
       const unsub = footerData.onBranchChange(() => tui.requestRender());
+      const unsubPrs = prCount.subscribe(() => tui.requestRender());
 
       return {
-        dispose: unsub,
+        dispose() { unsub(); unsubPrs(); },
         invalidate() {},
         render(width: number): string[] {
           // ── Gather data ──────────────────────────────────
@@ -440,23 +415,9 @@ export default function (pi: ExtensionAPI) {
             ));
           }
 
-          // Todo segment
-          const todoCounts = getTodoCounts();
-          if (todoCounts.total > 0) {
-            let todoText: string;
-            let todoColor: SegmentColors;
-            if (todoCounts.overdue > 0) {
-              todoText = `🔴 ${todoCounts.overdue} overdue · ${todoCounts.total} todo`;
-              todoColor = PALETTE.todoAlert;
-            } else if (todoCounts.stale > 0) {
-              todoText = `⚠ ${todoCounts.stale} stale · ${todoCounts.total} todo`;
-              todoColor = PALETTE.todoWarn;
-            } else {
-              todoText = `📋 ${todoCounts.total} todo`;
-              todoColor = PALETTE.todoClean;
-            }
-            leftSegs.push(buildSegment(todoText, todoColor));
-          }
+          // Cached PR count — rendering never starts a subprocess or network request.
+          const prs = prSegment(prCount.snapshot);
+          leftSegs.push(buildSegment(prs.text, prs.warning ? PALETTE.prsWarning : PALETTE.prs));
 
           // ── Build right segments ───────────────────────────
           const rightSegs: Segment[] = [];

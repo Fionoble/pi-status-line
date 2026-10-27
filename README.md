@@ -3,7 +3,7 @@
 A **powerline-style status line** for the [pi coding agent](https://github.com/badlogic/pi-mono) — replacing the default footer with a rich, information-dense bar.
 
 ```
- ⬡ claude-sonnet-4-20250514  ◕ high  ↑12.3k ↓2.1k  $0.042  📋 8 todo     📂 …/my/project   main  ⟳ 5  ✓ ready 
+ ⬡ claude-sonnet-4-20250514  ◕ high  ↑12.3k ↓2.1k  $0.042  PRs 7d: 16     📂 …/my/project   main  ⟳ 5  ✓ ready
 ```
 
 > Works with any terminal that supports true color (24-bit RGB) and powerline fonts.
@@ -38,7 +38,7 @@ pi remove git:github.com/Fionoble/pi-status-line/todo
 
 ## ✨ Status Line Features
 
-### Left Side — Model, Usage & Todo
+### Left Side — Model, Usage & Shipped PRs
 
 | Segment | Icon | Description |
 |---------|------|-------------|
@@ -46,7 +46,7 @@ pi remove git:github.com/Fionoble/pi-status-line/todo
 | **Thinking** | `○` `◔` `◑` `◕` `●` `⬤` | Reasoning level — hidden when `off` |
 | **Tokens** | `↑` `↓` | Cumulative input/output tokens, auto-formatted |
 | **Cost** | `$` | Session cost — hidden when zero |
-| **Todo** | `📋` `⚠` `🔴` | Open todo count — hidden when no `~/.pi/agent/todo.md` exists |
+| **Shipped PRs** | `PRs 7d: N` | Merged PRs in the last rolling 168 hours, including River PRs assigned to you |
 
 ### Right Side — Context & State
 
@@ -57,18 +57,25 @@ pi remove git:github.com/Fionoble/pi-status-line/todo
 | **Turns** | `⟳` | Turn count, restored on resume |
 | **Agent state** | `✓` `◉` `⚙` | `ready` / `thinking` / `tools` |
 
-### Todo Segment
+### Shipped PR Segment
 
-The todo segment reads `~/.pi/agent/todo.md` if it exists. Three visual states:
+`PRs 7d: N` counts merged PRs across:
+
+- GitHub: PRs authored by the signed-in `gh` user, across accessible repositories.
+- Delta: PRs authored by the signed-in `dt` user, plus River-authored PRs assigned to that user. River's current service identity and its legacy bot accounts are recognized.
+
+Delta defaults to `shop/world`. Set `PI_STATUS_DELTA_REPOS=shop/world,shop/other` before launching Pi to include more repositories. Delta requires repository-scoped searches. PRs are deduplicated by repository and number, including overlapping author/assignee queries and GitHub-to-Delta migrations.
+
+Requires existing authenticated `gh` and `dt` CLIs. The extension makes read-only calls, never launches a login flow, refreshes in the background every **5 minutes**, and caches the last complete count in memory. No commands or network requests run during rendering. A new session/reload fetches a fresh snapshot. Shutdown cancels reads and stops the timer. There are no new package dependencies (tests require Node.js 22.18+ with native TypeScript support).
 
 | State | Color | Example |
 |-------|-------|---------|
-| Normal | Green | `📋 12 todo` |
-| Has stale items (⚠️ STALE prefix) | Amber | `⚠ 3 stale · 12 todo` |
-| Has overdue items (🔴 OVERDUE prefix) | Red | `🔴 2 overdue · 12 todo` |
-| Empty / no file | Hidden | *(segment not shown)* |
+| Loading | Green | `PRs 7d: …` |
+| Fresh | Green | `PRs 7d: 16` (including a valid zero) |
+| Refresh failed / cache expired | Amber | `PRs 7d: 16 (stale)` |
+| No complete count available | Amber | `PRs 7d: unavailable` |
 
-This works with any markdown todo file that uses `- [ ]` checkboxes — you don't need the pi-todo extension. But they pair well together.
+Failed, malformed, incomplete, or capped searches do not become a partial total or a false zero. The status bar no longer reads or displays todos; the optional `/todo` extension and its files are unchanged.
 
 ---
 
@@ -101,9 +108,8 @@ sudo apt install fonts-firacode
 | Thinking | `rgb(80, 60, 120)` |
 | Tokens | `rgb(50, 80, 60)` |
 | Cost | `rgb(90, 75, 40)` |
-| Todo (normal) | `rgb(40, 65, 45)` |
-| Todo (stale) | `rgb(90, 75, 35)` |
-| Todo (overdue) | `rgb(100, 40, 40)` |
+| PRs (fresh) | `rgb(40, 65, 45)` |
+| PRs (stale/unavailable) | `rgb(90, 75, 35)` |
 | Working dir | `rgb(55, 60, 70)` |
 | Git | `rgb(80, 55, 35)` |
 | Turns | `rgb(40, 65, 90)` |
@@ -181,7 +187,10 @@ Completed items get date-stamped (`— completed 2026-04-14`), appended to the d
 pi-status-line/
 ├── package.json          # Status line package (installed by default)
 ├── src/
-│   └── index.ts          # Powerline footer, segments, font detection, todo counts
+│   ├── index.ts          # Powerline footer, segments, font detection
+│   └── pr-count.ts       # Read-only PR collection, deduplication, cache and polling
+├── tests/
+│   └── pr-count.test.ts  # Counting, pagination, failures and lifecycle tests
 ├── todo/
 │   ├── package.json      # Todo package (installed separately)
 │   └── index.ts          # Interactive todo, LLM tool, done recap, commands
@@ -196,6 +205,9 @@ pi-status-line/
 ```bash
 git clone https://github.com/Fionoble/pi-status-line.git
 cd pi-status-line
+
+# Unit tests (no network or additional dependencies)
+npm test
 
 # Test status line only
 pi -e ./src/index.ts
